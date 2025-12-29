@@ -12,6 +12,7 @@ under outputs/.
 from datetime import datetime
 
 import torch
+import pandas as pd
 
 from fyp_trading.backtest import backtest_from_cv_preds
 from fyp_trading.config import LabelingConfig, PipelineConfig, TrainConfig
@@ -50,6 +51,10 @@ def main() -> None:
 
     # 3) Pipeline windows: longer context + larger train window for time-series models
     pipe_cfg = PipelineConfig(
+        # IMPORTANT: with long lookback + large train window + longer indicators (e.g. SMA_100),
+        # period=3y may leave too few out-of-sample test days (e.g. only ~63 days).
+        # Use a longer history so the backtest can cover ~252 trading days consistently.
+        period="10y",
         lookback=90,
         train_window=420,
         val_size=21,
@@ -117,6 +122,12 @@ def main() -> None:
     metrics_df.to_csv(metrics_path, index=False)
     preds_df.to_csv(preds_path, index=False)
     print("Saved:", metrics_path.name, preds_path.name)
+    if not preds_df.empty:
+        d0 = pd.to_datetime(preds_df["date"]).min().date()
+        d1 = pd.to_datetime(preds_df["date"]).max().date()
+        print(f"OOS preds date range: {d0} ~ {d1}, N={len(preds_df)}")
+    else:
+        print("WARNING: preds_df is empty (no out-of-sample predictions). Check CV windows/filters.")
 
     # Long-only trading is often more realistic for ETFs and avoids systematic short drag in bull regimes.
     bt_df, bt_stats = backtest_from_cv_preds(
@@ -133,6 +144,11 @@ def main() -> None:
     bt_df.to_csv(bt_ts_path, index=False)
     save_json(bt_stats_path, bt_stats)
     print("Saved:", bt_ts_path.name, bt_stats_path.name)
+    if float(bt_stats.get("days", 0.0)) < float(pipe_cfg.backtest_days):
+        print(
+            f"WARNING: backtest uses only {bt_stats.get('days')} days (< backtest_days={pipe_cfg.backtest_days}). "
+            "This usually means too few OOS predictions (period too short or windows too large)."
+        )
 
     title = (
         f"Informer-OPT Backtest ({pipe_cfg.ticker}) | thr={pipe_cfg.proba_threshold:.2f}, "
