@@ -54,9 +54,10 @@ def fixed_window_cv_transformer(
 
         mask_ud_train = y_train != cfg_train.neutral_class_id
         mask_ud_val = y_val != cfg_train.neutral_class_id
-        if mask_ud_train.sum() < 20 or mask_ud_val.sum() < 5:
-            fold_id += 1
-            continue
+        if cfg_train.loss_mode == "masked_ud":
+            if mask_ud_train.sum() < 20 or mask_ud_val.sum() < 5:
+                fold_id += 1
+                continue
 
         mean, std = fit_scaler_3d(X_train)
         X_train_sc = transform_3d(X_train, mean, std)

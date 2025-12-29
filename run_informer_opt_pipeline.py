@@ -32,8 +32,8 @@ def main() -> None:
     print("Device:", device)
 
     # --- Key optimizations informed by prior findings ---
-    # 1) Labels: slightly easier directional threshold -> more signal coverage
-    label_cfg = LabelingConfig(k_dynamic=0.6)
+    # 1) Labels: easier directional threshold -> more Up/Down samples (less "all-neutral")
+    label_cfg = LabelingConfig(k_dynamic=0.5)
 
     # 2) Training: use full 3-class CE (better calibrated probabilities than masked UD-only)
     train_cfg = TrainConfig(
@@ -56,7 +56,9 @@ def main() -> None:
         test_size=21,
         step_size=21,
         horizon=1,
-        proba_threshold=0.52,
+        # With 3-class CE, probabilities are often less "peaky"; too high a threshold
+        # can lead to zero trades (flat equity). Start lower, then tune based on coverage/turnover.
+        proba_threshold=0.34,
         min_holding_period=5,
         transaction_cost_bp=2.0,
         backtest_days=252,

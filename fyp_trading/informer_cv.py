@@ -52,11 +52,15 @@ def fixed_window_cv_informer(
         y_test = y_all[test_start:test_end]
         test_dates = seq_index[test_start:test_end]
 
+        # When using masked UD-only loss, we must ensure enough directional samples.
+        # For full 3-class CE, do NOT skip folds; otherwise you can end up with too few
+        # out-of-sample predictions (and an apparently "too short" backtest).
         mask_ud_train = y_train != cfg_train.neutral_class_id
         mask_ud_val = y_val != cfg_train.neutral_class_id
-        if mask_ud_train.sum() < 20 or mask_ud_val.sum() < 5:
-            fold_id += 1
-            continue
+        if cfg_train.loss_mode == "masked_ud":
+            if mask_ud_train.sum() < 20 or mask_ud_val.sum() < 5:
+                fold_id += 1
+                continue
 
         mean, std = fit_scaler_3d(X_train)
         X_train_sc = transform_3d(X_train, mean, std)
