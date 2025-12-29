@@ -1,0 +1,184 @@
+\documentclass[11pt,a4paper]{article}
+
+% Compile with XeLaTeX for modern fonts and future multilingual content.
+
+\usepackage{geometry}
+\geometry{margin=1in}
+
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath,amssymb}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{microtype}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{fontspec}
+
+% Fonts (XeLaTeX) — use TeX Live fonts available on Overleaf by default
+\setmainfont{TeX Gyre Pagella}
+\setsansfont{TeX Gyre Heros}
+\setmonofont{TeX Gyre Cursor}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!55!black,
+  urlcolor=blue!55!black,
+  citecolor=blue!55!black
+}
+
+\titleformat{\section}{\Large\bfseries}{\thesection}{0.8em}{}
+\titleformat{\subsection}{\large\bfseries}{\thesubsection}{0.8em}{}
+
+\setlist[itemize]{leftmargin=1.25em}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{Midterm Report: Quantitative Algorithmic Trading System}
+\rhead{\thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+
+\title{\textbf{Midterm Report: Quantitative Algorithmic Trading System}\\\vspace{0.2em}\large LSTM Baseline (End-to-End Pipeline and Evaluation)}
+\author{Liu Chen \quad (22100974D)}
+\date{29 Dec 2025}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This report documents the current stage of the project as an end-to-end, reproducible prototype for model-driven trading research. Using \textbf{2800.HK} daily bars as the primary instrument, we implement: data acquisition, feature engineering, a 3-class labeling scheme with volatility-adaptive thresholds, an LSTM classifier trained via fixed-window walk-forward cross-validation, signal generation with confidence filtering, and a cost-aware backtest on the most recent \textasciitilde1-year out-of-sample period. We present the full workflow, generated artifacts, and the quantitative outcomes from the latest run.
+\end{abstract}
+
+\section{Project Context and Objectives}
+The overall project scope and phased plan are described in the Proposal (\texttt{Proposal.pdf}). This midterm milestone focuses on building and validating a robust experimental workflow for: (i) predictive modeling on historical data, (ii) translating model outputs into trading decisions, and (iii) evaluating strategy performance under trading frictions (transaction costs).
+
+\section{Reproducible Pipeline (This Run)}
+This run is produced by \texttt{run\_lstm2\_pipeline.py}. All artifacts are written to \texttt{outputs/}:
+\begin{itemize}
+  \item \textbf{Model artifact}: \texttt{outputs/models/lstm2\_last\_fold\_20251229\_183712.pt}
+  \item \textbf{Plot}: \texttt{outputs/plots/lstm2\_backtest\_20251229\_183712.png}
+  \item \textbf{Reports}: \texttt{outputs/reports/} (run config, CV metrics, CV predictions, backtest stats, and backtest time series)
+\end{itemize}
+
+\subsection{Data}
+\textbf{Instrument:} 2800.HK (Tracker Fund of Hong Kong). Data is fetched via \texttt{yfinance} with \textbf{auto-adjusted} prices, using parameters \textbf{period=3y} and \textbf{interval=1d}. The run log indicates the effective date range is \textbf{2022-12-29 to 2025-12-29}, with \textbf{733} daily bars.
+
+\subsection{Feature Engineering (16 inputs)}
+The model input consists of 16 technical features (see \texttt{outputs/reports/lstm2\_run\_config\_20251229\_183712.json}):
+\begin{itemize}
+  \item Moving averages: SMA(5, 10, 20, 50)
+  \item Rolling variance of 1-day log returns: var(5, 10, 20)
+  \item RSI(14)
+  \item MACD: line, signal, histogram
+  \item Bollinger Bands: mid, upper, lower, bandwidth, \%b
+\end{itemize}
+Additionally, \texttt{logret\_1d} is computed for labeling but is not included in the 16-dimensional model input.
+
+\subsection{3-Class Labeling (Down / Neutral / Up)}
+The prediction target is the next-day log return:
+\[
+  r_{t+1}=\log\left(\frac{C_{t+1}}{C_t}\right).
+\]
+A volatility-adaptive threshold is constructed using a 20-day rolling standard deviation of \texttt{logret\_1d} and shifted by one day to avoid future leakage:
+\[
+  \tau_t=\max(\text{min\_vol},\,k\cdot\sigma_{t}^{(20)}),\quad k=0.8,\ \text{min\_vol}=10^{-4}.
+\]
+Labels are defined as:
+\begin{itemize}
+  \item $r_{t+1}\ge \tau_t \Rightarrow$ Up
+  \item $r_{t+1}\le -\tau_t \Rightarrow$ Down
+  \item otherwise $\Rightarrow$ Neutral
+\end{itemize}
+
+\subsection{Sequence Construction (lookback=30)}
+Each training sample is a fixed-length sequence of the past \textbf{30} trading days of features, with shape $[30,16]$. The label is aligned to the end of the window.
+
+\section{Model and Training Setup (LSTM Classifier)}
+\subsection{Architecture}
+We use a PyTorch LSTM classifier with a 3-class softmax output:
+\begin{itemize}
+  \item LSTM hidden size: 64
+  \item Number of layers: 2
+  \item Dropout: 0.4
+  \item Output: 3 logits (Down/Neutral/Up)
+\end{itemize}
+
+\subsection{Loss and Class Imbalance Handling}
+Training uses a \textbf{masked cross-entropy} loss: only Up/Down samples contribute to the loss (Neutral is ignored). Class weights for Down vs Up are computed per fold from the training split.
+
+\subsection{Optimization}
+\begin{itemize}
+  \item Optimizer: Adam (lr=1e-3, weight\_decay=1e-4)
+  \item Scheduler: ReduceLROnPlateau (factor=0.5, patience=8, min\_lr=1e-5)
+  \item Early stopping: patience=15 on validation loss
+  \item Batch size: 64; Max epochs: 100
+  \item Device: CPU (this run)
+\end{itemize}
+
+\section{Time-Series Cross-Validation (Fixed-Window Walk-Forward)}
+We adopt fixed-window walk-forward CV:
+\begin{itemize}
+  \item Train window: 250 sequence samples
+  \item Validation window: 21 samples
+  \item Test window: 21 samples
+  \item Step size: 21 samples per fold
+\end{itemize}
+Per fold, standardization statistics (mean/std) are fit on the training split only and then applied to validation/test splits.
+
+\section{From Predictions to Trades: Backtest Logic}
+\subsection{Confidence Filtering and Position Rules}
+For each out-of-sample day, the model produces probabilities $(P(\text{Down}),P(\text{Neutral}),P(\text{Up}))$. We apply a confidence threshold \textbf{0.57}:
+\begin{itemize}
+  \item If $\max P < 0.57$, force prediction to Neutral (no trade).
+  \item If $P(\text{Up})\ge 0.57$ and $P(\text{Up})\ge P(\text{Down})$, take Long (+1).
+  \item If $P(\text{Down})\ge 0.57$ and $P(\text{Down})> P(\text{Up})$, take Short (-1).
+\end{itemize}
+\textbf{Minimum holding period:} 2 trading days (once a position is opened, it is held for at least 2 days).
+
+\subsection{Returns, Costs, and Equity}
+Daily simple return is derived from log return: $R_t=\exp(r_t)-1$. Strategy return is $pos_t\cdot R_t$, and transaction cost is charged on absolute position changes at \textbf{2 bps} per change. Equity curves are computed via cumulative multiplication.
+
+\section{Results of This Run}
+\subsection{Backtest Statistics (Last 252 Trading Days)}
+Backtest statistics are from \texttt{outputs/reports/lstm2\_backtest\_stats\_20251229\_183712.json} and summarized in Table~\ref{tab:bt}.
+
+\begin{table}[H]
+\centering
+\caption{Backtest summary (LSTM strategy vs Buy\&Hold, last \textasciitilde1 year)}
+\label{tab:bt}
+\begin{tabular}{lrr}
+\toprule
+Metric & LSTM Strategy & Buy\&Hold \\
+\midrule
+Days & 252 & 252 \\
+Total return & -0.0623 & 0.2230 \\
+Annualized return & -0.0623 & 0.2230 \\
+Annualized volatility & 0.1033 & -- \\
+Sharpe ratio & -0.5711 & -- \\
+Max drawdown & -0.1344 & -- \\
+Position coverage & 0.2540 & 1.0000 \\
+Transaction cost & 2.0 bps & -- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Equity Curve, Position, and Model Confidence}
+Figure~\ref{fig:bt} is generated by \texttt{outputs/plots/lstm2\_backtest\_20251229\_183712.png}. The top panel compares strategy equity (after costs) vs Buy\&Hold; the middle panel shows the discrete position; the bottom panel shows $P(\text{Up})$ and $P(\text{Down})$ with the confidence threshold at 0.57.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{lstm2_backtest_20251229_183712.png}
+\caption{LSTM pipeline backtest visualization: equity, position, and prediction confidence}
+\label{fig:bt}
+\end{figure}
+
+\section{Appendix: Run Configuration Snapshot}
+The full configuration snapshot is saved in \texttt{outputs/reports/lstm2\_run\_config\_20251229\_183712.json}. Key parameters include: lookback=30; train/val/test=250/21/21; confidence threshold=0.57; minimum holding=2; transaction cost=2 bps.
+
+\end{document}
+
+
