@@ -95,12 +95,18 @@ def equity_and_stats_from_positions(
     daily_mean = float(df["strategy_after_cost"].mean())
     daily_std = float(df["strategy_after_cost"].std())
 
+    # Diagnostics (apply the same to classic + ML/DL)
+    turnover = float(pos_change.mean())  # avg absolute position change per day (0~2 for {-1,0,1})
+    num_trades = float((pos_change > 0).sum())
+
     stats = {
         "days": float(total_days),
         "total_return": strategy_final - 1.0,
         "buyhold_total_return": buyhold_final - 1.0,
+        "excess_total_return": (strategy_final - buyhold_final),
         "annualized_return": strategy_final ** (1.0 / years) - 1.0,
         "buyhold_annualized_return": buyhold_final ** (1.0 / years) - 1.0,
+        "excess_annualized_return": (strategy_final ** (1.0 / years) - buyhold_final ** (1.0 / years)),
         "annualized_volatility": daily_std * np.sqrt(252.0),
         "sharpe_ratio": (daily_mean / daily_std) * np.sqrt(252.0) if daily_std > 1e-8 else float("nan"),
         "max_drawdown": float((df["strategy_equity"] / df["strategy_equity"].cummax() - 1.0).min()),
@@ -108,6 +114,8 @@ def equity_and_stats_from_positions(
         if (df["position"] != 0).any()
         else float("nan"),
         "coverage": float((df["position"] != 0).mean()),
+        "turnover": turnover,
+        "num_trades": num_trades,
         "transaction_cost_bp": float(transaction_cost_bp),
     }
     return df, stats

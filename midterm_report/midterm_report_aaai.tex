@@ -1,0 +1,307 @@
+% Midterm report written in AAAI 2026 style (PDFLaTeX).
+% IMPORTANT:
+% - Compile with PDFLaTeX (NOT XeLaTeX).
+% - Do not add forbidden packages listed in the AAAI author kit.
+% - To include the backtest figure, upload the PNG to the same Overleaf project.
+
+\documentclass[letterpaper]{article} % DO NOT CHANGE THIS
+\usepackage{aaai2026}  % DO NOT CHANGE THIS
+\usepackage{times}  % DO NOT CHANGE THIS
+\usepackage{helvet}  % DO NOT CHANGE THIS
+\usepackage{courier}  % DO NOT CHANGE THIS
+\usepackage[hyphens]{url}  % DO NOT CHANGE THIS
+\usepackage{graphicx} % DO NOT CHANGE THIS
+\urlstyle{rm} % DO NOT CHANGE THIS
+\def\UrlFont{\rm}  % DO NOT CHANGE THIS
+\usepackage{natbib}  % DO NOT CHANGE THIS AND DO NOT ADD ANY OPTIONS TO IT
+\usepackage{caption} % DO NOT CHANGE THIS AND DO NOT ADD ANY OPTIONS TO IT
+\frenchspacing  % DO NOT CHANGE THIS
+\setlength{\pdfpagewidth}{8.5in} % DO NOT CHANGE THIS
+\setlength{\pdfpageheight}{11in} % DO NOT CHANGE THIS
+\pdfinfo{
+/TemplateVersion (2026.1)
+}
+
+\setcounter{secnumdepth}{0}
+
+\title{From LSTM Baselines to Transformers: A Midterm Milestone for a Quantitative Trading System}
+
+\author{
+Liu Chen\\
+}
+
+\affiliations{
+BSc (HONS) Computer Science\\
+Student ID: 22100974D\\
+Supervisor: Prof.\ Henry C.\ B.\ Chan\\
+}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This midterm report presents the first end-to-end milestone of a quantitative algorithmic trading system prototype. Using 2800.HK daily OHLCV data over the most recent three years, we first established classic rule-based strategy baselines (RSI, Bollinger mean-reversion, dual moving-average trend, and Donchian breakouts) as an interpretability-first benchmark. We then implemented a complete ML workflow: data ingestion, technical feature engineering, volatility-adaptive 3-class labeling, fixed-window walk-forward cross-validation, and a cost-aware backtest driven by out-of-sample model probabilities. We report the results of two milestone runs (LSTM then Transformer), reflect on what we learned from turning predictions into tradable positions, and outline the next stage: scaling research beyond baselines while keeping time-respecting evaluation and reproducibility.
+\end{abstract}
+
+\section{Project Motivation and Midterm Goal}
+Financial markets are complex, noisy, and impacted by many interacting factors. While the Efficient Market Hypothesis suggests persistent alpha is difficult, short-horizon patterns may exist and can be explored through careful modeling and robust backtesting. The long-term goal of this project is to design and evaluate a complete data-driven trading system. The midterm goal is more concrete: build a pipeline that is (i) time-respecting (no lookahead leakage), (ii) reproducible, and (iii) able to generate standardized artifacts (metrics, plots, logs) for iterative research.
+
+\section{Data and Problem Setup}
+\textbf{Instrument.} 2800.HK (Tracker Fund of Hong Kong), chosen for liquidity and relevance as a Hang Seng Index proxy.
+
+\textbf{Data source.} Daily OHLCV from \texttt{yfinance} with auto-adjusted prices.
+
+\textbf{Time span.} Three years of daily bars were requested (period=3y, interval=1d). In the latest run, the effective date range was 2022-12-29 to 2025-12-29 with 733 daily observations.
+
+\textbf{Prediction target.} Next-day close-to-close log return:
+\[
+r_{t+1}=\log\left(\frac{C_{t+1}}{C_t}\right).
+\]
+
+\section{Feature Engineering and Labeling}
+\subsection{Technical features (16 inputs)}
+We use 16 technical features derived from price history:
+\begin{itemize}
+  \item Moving averages: SMA(5), SMA(10), SMA(20), SMA(50)
+  \item Rolling variance of 1-day log returns: var(5), var(10), var(20)
+  \item RSI(14)
+  \item MACD: line, signal, histogram
+  \item Bollinger bands: mid, upper, lower, bandwidth, \%b
+\end{itemize}
+These are intentionally simple and interpretable to establish a strong baseline before moving to more complex representations.
+
+\subsection{Volatility-adaptive 3-class labels}
+Instead of labeling with a fixed return threshold, we use a dynamic threshold tied to recent volatility to reduce regime sensitivity. Let $\sigma^{(20)}_t$ be the rolling standard deviation of 1-day log returns over a 20-day window. To avoid leakage, the volatility estimate is shifted by one day. The threshold is:
+\[
+\tau_t=\max(\text{min\_vol},\,k\cdot\sigma_{t}^{(20)}),\quad k=0.8,\ \text{min\_vol}=10^{-4}.
+\]
+Labels are assigned as:
+\begin{itemize}
+  \item Up if $r_{t+1}\ge \tau_t$
+  \item Down if $r_{t+1}\le -\tau_t$
+  \item Neutral otherwise
+\end{itemize}
+This produces a 3-class classification task where Neutral corresponds to small moves and Up/Down correspond to larger directional moves.
+
+\section{Classic Quantitative Strategy Exploration (Pre-ML Baselines)}
+Before training any ML/DL models, we implemented and backtested several classic, interpretable strategies to (i) validate the data pipeline end-to-end, (ii) build intuition for 2800.HK dynamics, and (iii) set realistic benchmarks for later ML/DL comparisons \citep{chan2013}. These baselines are not optimized; the goal is to establish a transparent ``first ruler''.
+
+\subsection{Backtest setup (aligned assumptions)}
+All classic strategies use the same close-to-close return definition and cost model:
+\begin{itemize}
+  \item Signal computed using information available at day $t$; realized P\&L applies to $t\rightarrow t{+}1$ return.
+  \item Transaction cost: 2 bps charged on absolute position changes.
+  \item Benchmark: Buy\&Hold on the same instrument and period.
+\end{itemize}
+For this exploration phase, we report results over the full 3-year sample (733 daily observations). Later, ML/DL runs use a ``last 252 trading days'' backtest window to match the out-of-sample walk-forward prediction horizon.
+
+\subsection{Representative strategies}
+\textbf{Mean-reversion (RSI / Bollinger).} These strategies attempt to buy short-term weakness and sell strength. In our run, RSI achieved a high Sharpe ratio but extremely low coverage (only trading on a small fraction of days), which naturally limits total return compared to Buy\&Hold in a generally rising market.
+
+\textbf{Trend-following (Dual MA / Donchian).} Trend strategies aim to capture persistent moves but can suffer in choppy regimes through whipsaws. In our run, Dual MA had much higher coverage (near half the days) but also higher drawdowns, while Donchian breakouts underperformed Buy\&Hold over this 3-year window.
+
+\subsection{Classic baseline summary}
+Table~\ref{tab:classic_bt} summarizes a subset of classic strategies (3-year sample, costs included). The full comparison table and per-strategy time series are exported to \texttt{outputs/reports/}.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lrrrr}
+\hline
+Strategy & Total ret. & Sharpe & Max DD & Coverage \\
+\hline
+RSI & 0.1325 & 1.2977 & -0.0029 & 0.0109 \\
+Bollinger (MR) & 0.0735 & 0.4944 & -0.0998 & 0.0464 \\
+Dual MA (10/50) & 0.1075 & 0.2864 & -0.2010 & 0.4911 \\
+Donchian (20/10) & -0.0275 & 0.0047 & -0.2164 & 0.3438 \\
+\hline
+Buy\&Hold (same 3y) & 0.4436 & -- & -- & 1.0000 \\
+\hline
+\end{tabular}
+\caption{Classic strategy baselines on 2800.HK (full 3-year sample, 733 days; 2 bps transaction cost). While some strategies show attractive risk-adjusted metrics (e.g., RSI Sharpe), they generally trail Buy\&Hold in total return due to low exposure (coverage) and trading frictions.}
+\label{tab:classic_bt}
+\end{table}
+
+\subsection{Classic equity curve examples}
+Figures~\ref{fig:classic_rsi} and~\ref{fig:classic_dualma} show two representative classic strategies: a low-exposure mean-reversion baseline (RSI) and a higher-exposure trend baseline (Dual MA). These figures are exported by \texttt{run\_classic\_strategies.py}.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{classic_rsi_backtest_20251229_220548.png}
+\caption{Classic baseline example: RSI mean-reversion (equity curve and position).}
+\label{fig:classic_rsi}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{classic_dualma10_50_backtest_20251229_220548.png}
+\caption{Classic baseline example: Dual moving-average trend (equity curve and position).}
+\label{fig:classic_dualma}
+\end{figure}
+
+\section{Model: LSTM Baseline (First End-to-End Run)}
+\subsection{Sequence construction}
+We convert the feature table into fixed-length sequences with lookback=30. Each training sample is a tensor of shape $[30,16]$ and is labeled at the end of the window.
+
+\subsection{Architecture and training}
+We train a PyTorch LSTM multi-class classifier with the following configuration:
+\begin{itemize}
+  \item Hidden size: 64; Layers: 2; Dropout: 0.4
+  \item Optimizer: Adam (lr=1e-3, weight decay=1e-4)
+  \item Scheduler: ReduceLROnPlateau; early stopping on validation loss
+\end{itemize}
+\textbf{Masked loss.} To emphasize directional decisions, we compute cross-entropy loss on Up/Down samples only; Neutral samples are excluded from the loss (but still appear as a prediction class).
+
+\subsection{Fixed-window walk-forward cross-validation}
+We use a time-respecting fixed-window scheme:
+\begin{itemize}
+  \item Train window: 250 sequence samples
+  \item Validation window: 21 samples
+  \item Test window: 21 samples
+  \item Step size: 21 samples per fold
+\end{itemize}
+Feature standardization is fit only on each fold's training split and then applied to its validation and test splits.
+
+\section{From Probabilities to Trades: Backtest Design}
+\subsection{Confidence filtering and positions}
+For each out-of-sample day, the model outputs probabilities $(P(\text{Down}),P(\text{Neutral}),P(\text{Up}))$. We apply a confidence threshold of 0.57:
+\begin{itemize}
+  \item If $\max P < 0.57$, force prediction to Neutral (no directional trade).
+  \item Long (+1) if $P(\text{Up})\ge 0.57$ and $P(\text{Up})\ge P(\text{Down})$.
+  \item Short (-1) if $P(\text{Down})\ge 0.57$ and $P(\text{Down})> P(\text{Up})$.
+\end{itemize}
+We additionally enforce a minimum holding period of 2 trading days to reduce rapid flip-flopping.
+
+\subsection{Returns, costs, and equity curves}
+We convert log returns to simple returns: $R_t=\exp(r_t)-1$. Strategy return is $pos_t\cdot R_t$. Transaction cost is charged on absolute position changes at 2 basis points per change. We compute equity curves by cumulative multiplication.
+
+\section{Results: Milestones (Classic Baselines, then LSTM and Transformer)}
+\subsection{Milestone 1: LSTM baseline (first reproducible ML run)}
+The first successful end-to-end run used an LSTM classifier and produced a complete set of standardized artifacts (configuration snapshot, walk-forward CV metrics, per-day probabilities, and backtest outputs). Table~\ref{tab:lstm_bt} summarizes the cost-aware backtest metrics over the last 252 trading days (approximately 1 year), compared to a Buy\&Hold benchmark.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lrr}
+\hline
+Metric & LSTM Strategy & Buy\&Hold \\
+\hline
+Days & 252 & 252 \\
+Total return & -0.0623 & 0.2230 \\
+Annualized return & -0.0623 & 0.2230 \\
+Annualized volatility & 0.1033 & -- \\
+Sharpe ratio & -0.5711 & -- \\
+Max drawdown & -0.1344 & -- \\
+Position coverage & 0.2540 & 1.0000 \\
+Transaction cost & 2 bps & -- \\
+\hline
+\end{tabular}
+\caption{Backtest summary for the LSTM baseline (last \textasciitilde1 year, costs included).}
+\label{tab:lstm_bt}
+\end{table}
+
+\subsection{LSTM equity curve, position, and confidence}
+Figure~\ref{fig:lstm_bt} visualizes the LSTM backtest: equity curves (strategy vs Buy\&Hold), discrete position, and $P(\text{Up})/P(\text{Down})$ with the confidence threshold.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{lstm2_backtest_20251229_183712.png}
+\caption{LSTM backtest visualization (equity, position, probabilities).}
+\label{fig:lstm_bt}
+\end{figure}
+
+\subsection{Milestone 2: Transformer encoder baseline (second run on GPU)}
+After establishing the LSTM baseline, we implemented a Transformer encoder classifier under the \emph{same} evaluation protocol (same data span, features, labels, walk-forward CV windows, confidence threshold, holding period, and transaction costs). This run was executed on Google Colab with GPU acceleration to support deeper architectures.
+
+\textbf{Model summary.} The Transformer takes the same $[30,16]$ feature sequences as input and uses: $d_{model}=64$, $nhead=4$, $3$ encoder layers, feedforward dimension $256$, dropout $0.2$, and a learnable \texttt{[CLS]} token for sequence pooling \citep{vaswani2017}.
+
+Table~\ref{tab:tx_bt} summarizes the 1-year backtest statistics for the Transformer run (cost-aware), again compared to Buy\&Hold.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lrr}
+\hline
+Metric & Transformer Strategy & Buy\&Hold \\
+\hline
+Days & 252 & 252 \\
+Total return & 0.0094 & 0.2230 \\
+Annualized return & 0.0094 & 0.2230 \\
+Annualized volatility & 0.2173 & -- \\
+Sharpe ratio & 0.1482 & -- \\
+Max drawdown & -0.1732 & -- \\
+Position coverage & 0.6230 & 1.0000 \\
+Transaction cost & 2 bps & -- \\
+\hline
+\end{tabular}
+\caption{Backtest summary for the Transformer baseline (last \textasciitilde1 year, costs included).}
+\label{tab:tx_bt}
+\end{table}
+
+\subsection{Transformer equity curve, position, and confidence}
+Figure~\ref{fig:tx_bt} shows the Transformer backtest visualization with the same plot layout as the LSTM run.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{transformer_backtest_20251229_125307.png}
+\caption{Transformer backtest visualization (equity, position, probabilities).}
+\label{fig:tx_bt}
+\end{figure}
+
+\section{What We Learned From the First Full Run}
+The first successful end-to-end run is a meaningful milestone even before optimizing performance:
+\begin{itemize}
+  \item \textbf{Reproducibility matters.} A research loop becomes faster once each run produces standardized artifacts: run configuration, per-fold metrics, per-day predictions, backtest statistics, and plots.
+  \item \textbf{Time-respecting evaluation is non-negotiable.} Walk-forward validation and train-only standardization are necessary to avoid inflated results.
+  \item \textbf{Trading logic is part of the model.} The confidence threshold, minimum holding period, and cost model directly shape the realized strategy behavior; these assumptions must be explicit and consistent across model comparisons.
+\end{itemize}
+These lessons shape how we will evaluate the next generation of models.
+
+\section{Next Stage: Beyond Baselines (Transformers, Market-Aware Models, and LLM Signals)}
+With both an LSTM baseline and a Transformer baseline implemented under a consistent evaluation protocol, the next stage is to scale model capacity and research scope while preserving methodological rigor. Our plan is to:
+\begin{itemize}
+  \item Explore time-series Transformers designed for longer context and efficiency (e.g., Informer-style mechanisms) once the baseline is stable.
+  \item Expand from a single instrument (2800.HK) to a small multi-instrument universe (e.g., selected HK large-caps) to enable market-aware modeling.
+  \item Evaluate market-guided Transformer variants (e.g., MASTER-style ideas) when cross-sectional information becomes available.
+  \item Investigate LLM-based feature extraction as an auxiliary signal source (e.g., structured summaries or sentiment proxies), while enforcing strict anti-leakage constraints in the research design.
+\end{itemize}
+This progression reflects a ``growth path'' from simple, interpretable baselines to higher-capacity models, with the evaluation framework kept consistent to ensure fair comparisons.
+
+\section{Reproducibility and Artifacts}
+All outputs are generated by one-command scripts and saved under \texttt{outputs/}:
+\begin{itemize}
+  \item Classic strategies: \texttt{python run\_classic\_strategies.py}
+  \item LSTM run: \texttt{python run\_lstm2\_pipeline.py}
+  \item Transformer run: \texttt{python run\_transformer\_pipeline.py}
+  \item CV metrics and predictions: \texttt{outputs/reports/*\_cv\_metrics\_*.csv}, \texttt{outputs/reports/*\_cv\_preds\_*.csv}
+  \item Backtest outputs: \texttt{outputs/reports/*\_backtest\_stats\_*.json}, \texttt{outputs/reports/*\_backtest\_timeseries\_*.csv}
+  \item Plots: \texttt{outputs/plots/*.png}
+  \item Model artifacts (last fold): \texttt{outputs/models/*\_last\_fold\_*.pt}
+\end{itemize}
+These files enable the project to grow while preserving traceability between code, configuration, and results.
+
+\begin{thebibliography}{}
+\bibitem[Fama 1970]{fama1970}
+Fama, E. F. 1970.
+Efficient capital markets: A review of theory and empirical work.
+\textit{Journal of Finance} 25(2):383--417.
+
+\bibitem[Chan 2013]{chan2013}
+Chan, E. P. 2013.
+\textit{Algorithmic Trading: Winning Strategies and Their Rationale}.
+John Wiley \& Sons.
+
+\bibitem[Hochreiter and Schmidhuber 1997]{lstm1997}
+Hochreiter, S.; and Schmidhuber, J. 1997.
+Long short-term memory.
+\textit{Neural Computation} 9(8):1735--1780.
+
+\bibitem[Vaswani et al.\ 2017]{vaswani2017}
+Vaswani, A.; Shazeer, N.; Parmar, N.; Uszkoreit, J.; Jones, L.; Gomez, A. N.; Kaiser, \L.; and Polosukhin, I. 2017.
+Attention is all you need.
+In \textit{Advances in Neural Information Processing Systems (NeurIPS)}.
+\end{thebibliography}
+
+\end{document}
+
+
