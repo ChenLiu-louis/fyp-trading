@@ -63,10 +63,17 @@ def fixed_window_cv_informer(
         X_val_sc = transform_3d(X_val, mean, std)
         X_test_sc = transform_3d(X_test, mean, std)
 
-        counts = np.bincount(y_train[mask_ud_train], minlength=NUM_CLASSES)
-        w_down = counts.sum() / max(1.0, 2 * counts[CLASS_ID_DOWN])
-        w_up = counts.sum() / max(1.0, 2 * counts[CLASS_ID_UP])
-        class_weights = torch.tensor([w_down, 0.0, w_up], device=device, dtype=torch.float32)
+        if cfg_train.loss_mode == "full_ce":
+            counts_all = np.bincount(y_train, minlength=NUM_CLASSES)
+            # balanced weights; avoid division by zero
+            w = counts_all.sum() / np.maximum(counts_all, 1.0)
+            w = w / w.mean()
+            class_weights = torch.tensor(w, device=device, dtype=torch.float32)
+        else:
+            counts = np.bincount(y_train[mask_ud_train], minlength=NUM_CLASSES)
+            w_down = counts.sum() / max(1.0, 2 * counts[CLASS_ID_DOWN])
+            w_up = counts.sum() / max(1.0, 2 * counts[CLASS_ID_UP])
+            class_weights = torch.tensor([w_down, 0.0, w_up], device=device, dtype=torch.float32)
 
         model = InformerMultiClassifier(
             input_size=X_train_sc.shape[-1],

@@ -36,6 +36,12 @@ class TrainConfig:
     # 0=Down, 1=Neutral, 2=Up
     neutral_class_id: int = 1
 
+    # Loss mode:
+    # - "masked_ud": cross-entropy only on Up/Down samples (legacy baseline)
+    # - "full_ce": cross-entropy on all 3 classes (better calibrated probabilities)
+    loss_mode: str = "masked_ud"
+    label_smoothing: float = 0.0
+
 
 @dataclass(frozen=True)
 class PipelineConfig:

@@ -28,6 +28,24 @@ def masked_cross_entropy(
     return nn.functional.cross_entropy(logits_sel, target_sel, weight=class_weights)
 
 
+def compute_loss(
+    logits: torch.Tensor,
+    target: torch.Tensor,
+    cfg: TrainConfig,
+    class_weights: Optional[torch.Tensor],
+) -> torch.Tensor:
+    if cfg.loss_mode == "masked_ud":
+        return masked_cross_entropy(logits, target, cfg.neutral_class_id, class_weights)
+    if cfg.loss_mode == "full_ce":
+        return nn.functional.cross_entropy(
+            logits,
+            target,
+            weight=class_weights,
+            label_smoothing=float(getattr(cfg, "label_smoothing", 0.0) or 0.0),
+        )
+    raise ValueError(f"Unknown TrainConfig.loss_mode={cfg.loss_mode!r}")
+
+
 def make_loader(X: np.ndarray, y: np.ndarray, batch_size: int, shuffle: bool) -> DataLoader:
     X_t = torch.from_numpy(X.astype(np.float32))
     y_t = torch.from_numpy(y.astype(np.int64))
@@ -69,7 +87,7 @@ def train_model(
             yb = yb.to(device, non_blocking=True)
             optimizer.zero_grad()
             logits = model(xb)
-            loss = masked_cross_entropy(logits, yb, cfg.neutral_class_id, class_weights)
+            loss = compute_loss(logits, yb, cfg, class_weights)
             loss.backward()
             if cfg.grad_clip is not None:
                 nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
@@ -86,7 +104,7 @@ def train_model(
                 xb = xb.to(device, non_blocking=True)
                 yb = yb.to(device, non_blocking=True)
                 logits = model(xb)
-                loss = masked_cross_entropy(logits, yb, cfg.neutral_class_id, class_weights)
+                loss = compute_loss(logits, yb, cfg, class_weights)
                 val_loss += loss.item() * xb.size(0)
                 n_val += xb.size(0)
         val_loss = val_loss / max(n_val, 1)
