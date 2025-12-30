@@ -6,5 +6,13 @@ yfinance
 scikit-learn
 torch
 xgboost
+requests
+charset_normalizer
+
+# Optional (next-stage: pretrained foundation models / FinBERT fine-tuning)
+# transformers
+# datasets
+# accelerate
+# sentencepiece
 
 

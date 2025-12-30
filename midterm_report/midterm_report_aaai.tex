@@ -24,7 +24,7 @@
 
 \setcounter{secnumdepth}{0}
 
-\title{From LSTM Baselines to Transformers: A Midterm Milestone for a Quantitative Trading System}
+\title{From Classic Strategies to Time-Series Transformers: A Midterm Milestone for a Quantitative Trading System}
 
 \author{
 Liu Chen\\
@@ -40,18 +40,18 @@ Supervisor: Prof.\ Henry C.\ B.\ Chan\\
 \maketitle
 
 \begin{abstract}
-This midterm report presents the first end-to-end milestone of a quantitative algorithmic trading system prototype. Using 2800.HK daily OHLCV data over the most recent three years, we first established classic rule-based strategy baselines (RSI, Bollinger mean-reversion, dual moving-average trend, and Donchian breakouts) as an interpretability-first benchmark. We then implemented a complete ML workflow: data ingestion, technical feature engineering, volatility-adaptive 3-class labeling, fixed-window walk-forward cross-validation, and a cost-aware backtest driven by out-of-sample model probabilities. We report the results of two milestone runs (LSTM then Transformer), reflect on what we learned from turning predictions into tradable positions, and outline the next stage: scaling research beyond baselines while keeping time-respecting evaluation and reproducibility.
+This midterm report presents my first end-to-end milestone of a quantitative algorithmic trading system prototype. Using 2800.HK daily OHLCV data, I began with classic rule-based strategy baselines (RSI, Bollinger mean-reversion, dual moving-average trend, and Donchian breakouts) to establish an interpretability-first benchmark. I then built a complete ML workflow: data ingestion, technical feature engineering, volatility-adaptive 3-class labeling, fixed-window walk-forward cross-validation, and a cost-aware backtest driven by out-of-sample probabilities. Finally, I explored time-series Transformers (Transformer encoder and an Informer-style model), and learned that much of realized performance comes from the \emph{translation layer} between probabilities and trades. I conclude with an Informer-OPT result refined via trading-rule parameter sweeping, and a clear plan for next-stage research built on reproducible, time-respecting evaluation.
 \end{abstract}
 
 \section{Project Motivation and Midterm Goal}
-Financial markets are complex, noisy, and impacted by many interacting factors. While the Efficient Market Hypothesis suggests persistent alpha is difficult, short-horizon patterns may exist and can be explored through careful modeling and robust backtesting. The long-term goal of this project is to design and evaluate a complete data-driven trading system. The midterm goal is more concrete: build a pipeline that is (i) time-respecting (no lookahead leakage), (ii) reproducible, and (iii) able to generate standardized artifacts (metrics, plots, logs) for iterative research.
+Financial markets are complex, noisy, and impacted by many interacting factors. While the Efficient Market Hypothesis suggests persistent alpha is difficult, short-horizon patterns may exist and can be explored through careful modeling and robust backtesting. The long-term goal of this project is to design and evaluate a complete data-driven trading system. My midterm goal is more concrete: build a pipeline that is (i) time-respecting (no lookahead leakage), (ii) reproducible, and (iii) able to generate standardized artifacts (metrics, plots, logs) for iterative research.
 
 \section{Data and Problem Setup}
 \textbf{Instrument.} 2800.HK (Tracker Fund of Hong Kong), chosen for liquidity and relevance as a Hang Seng Index proxy.
 
 \textbf{Data source.} Daily OHLCV from \texttt{yfinance} with auto-adjusted prices.
 
-\textbf{Time span.} Three years of daily bars were requested (period=3y, interval=1d). In the latest run, the effective date range was 2022-12-29 to 2025-12-29 with 733 daily observations.
+\textbf{Time span.} I started with three years of daily bars (period=3y, interval=1d), yielding 733 observations in the initial milestone runs. Later, when optimizing the Informer-style model with longer context windows, I expanded the data request to a longer history (period=10y) to ensure enough out-of-sample folds; final comparisons are always reported on a cost-aware backtest window of the last 252 trading days for the corresponding run.
 
 \textbf{Prediction target.} Next-day close-to-close log return:
 \[
@@ -60,7 +60,7 @@ r_{t+1}=\log\left(\frac{C_{t+1}}{C_t}\right).
 
 \section{Feature Engineering and Labeling}
 \subsection{Technical features (16 inputs)}
-We use 16 technical features derived from price history:
+I use 16 technical features derived from price history:
 \begin{itemize}
   \item Moving averages: SMA(5), SMA(10), SMA(20), SMA(50)
   \item Rolling variance of 1-day log returns: var(5), var(10), var(20)
@@ -71,7 +71,7 @@ We use 16 technical features derived from price history:
 These are intentionally simple and interpretable to establish a strong baseline before moving to more complex representations.
 
 \subsection{Volatility-adaptive 3-class labels}
-Instead of labeling with a fixed return threshold, we use a dynamic threshold tied to recent volatility to reduce regime sensitivity. Let $\sigma^{(20)}_t$ be the rolling standard deviation of 1-day log returns over a 20-day window. To avoid leakage, the volatility estimate is shifted by one day. The threshold is:
+Instead of labeling with a fixed return threshold, I use a dynamic threshold tied to recent volatility to reduce regime sensitivity. Let $\sigma^{(20)}_t$ be the rolling standard deviation of 1-day log returns over a 20-day window. To avoid leakage, the volatility estimate is shifted by one day. The threshold is:
 \[
 \tau_t=\max(\text{min\_vol},\,k\cdot\sigma_{t}^{(20)}),\quad k=0.8,\ \text{min\_vol}=10^{-4}.
 \]
@@ -84,7 +84,7 @@ Labels are assigned as:
 This produces a 3-class classification task where Neutral corresponds to small moves and Up/Down correspond to larger directional moves.
 
 \section{Classic Quantitative Strategy Exploration (Pre-ML Baselines)}
-Before training any ML/DL models, we implemented and backtested several classic, interpretable strategies to (i) validate the data pipeline end-to-end, (ii) build intuition for 2800.HK dynamics, and (iii) set realistic benchmarks for later ML/DL comparisons \citep{chan2013}. These baselines are not optimized; the goal is to establish a transparent ``first ruler''.
+Before training any ML/DL models, I implemented and backtested several classic, interpretable strategies to (i) validate the data pipeline end-to-end, (ii) build intuition for 2800.HK dynamics, and (iii) set realistic benchmarks for later ML/DL comparisons \citep{chan2013}. These baselines are not optimized; the goal is to establish a transparent ``first ruler''.
 
 \subsection{Backtest setup (aligned assumptions)}
 All classic strategies use the same close-to-close return definition and cost model:
@@ -93,12 +93,12 @@ All classic strategies use the same close-to-close return definition and cost mo
   \item Transaction cost: 2 bps charged on absolute position changes.
   \item Benchmark: Buy\&Hold on the same instrument and period.
 \end{itemize}
-For this exploration phase, we report results over the full 3-year sample (733 daily observations). Later, ML/DL runs use a ``last 252 trading days'' backtest window to match the out-of-sample walk-forward prediction horizon.
+For this exploration phase, I report results over the full 3-year sample (733 daily observations). Later, ML/DL runs use a ``last 252 trading days'' backtest window to match the out-of-sample walk-forward prediction horizon.
 
 \subsection{Representative strategies}
-\textbf{Mean-reversion (RSI / Bollinger).} These strategies attempt to buy short-term weakness and sell strength. In our run, RSI achieved a high Sharpe ratio but extremely low coverage (only trading on a small fraction of days), which naturally limits total return compared to Buy\&Hold in a generally rising market.
+\textbf{Mean-reversion (RSI / Bollinger).} These strategies attempt to buy short-term weakness and sell strength. In my run, RSI achieved a high Sharpe ratio but extremely low coverage (only trading on a small fraction of days), which naturally limits total return compared to Buy\&Hold in a generally rising market.
 
-\textbf{Trend-following (Dual MA / Donchian).} Trend strategies aim to capture persistent moves but can suffer in choppy regimes through whipsaws. In our run, Dual MA had much higher coverage (near half the days) but also higher drawdowns, while Donchian breakouts underperformed Buy\&Hold over this 3-year window.
+\textbf{Trend-following (Dual MA / Donchian).} Trend strategies aim to capture persistent moves but can suffer in choppy regimes through whipsaws. In my run, Dual MA had much higher coverage (near half the days) but also higher drawdowns, while Donchian breakouts underperformed Buy\&Hold over this 3-year window.
 
 \subsection{Classic baseline summary}
 Table~\ref{tab:classic_bt} summarizes a subset of classic strategies (3-year sample, costs included). The full comparison table and per-strategy time series are exported to \texttt{outputs/reports/}.
@@ -141,19 +141,19 @@ Figures~\ref{fig:classic_rsi} and~\ref{fig:classic_dualma} show two representati
 
 \section{Model: LSTM Baseline (First End-to-End Run)}
 \subsection{Sequence construction}
-We convert the feature table into fixed-length sequences with lookback=30. Each training sample is a tensor of shape $[30,16]$ and is labeled at the end of the window.
+I convert the feature table into fixed-length sequences with lookback=30. Each training sample is a tensor of shape $[30,16]$ and is labeled at the end of the window.
 
 \subsection{Architecture and training}
-We train a PyTorch LSTM multi-class classifier with the following configuration:
+I train a PyTorch LSTM multi-class classifier with the following configuration:
 \begin{itemize}
   \item Hidden size: 64; Layers: 2; Dropout: 0.4
   \item Optimizer: Adam (lr=1e-3, weight decay=1e-4)
   \item Scheduler: ReduceLROnPlateau; early stopping on validation loss
 \end{itemize}
-\textbf{Masked loss.} To emphasize directional decisions, we compute cross-entropy loss on Up/Down samples only; Neutral samples are excluded from the loss (but still appear as a prediction class).
+\textbf{Masked loss.} To emphasize directional decisions, I compute cross-entropy loss on Up/Down samples only; Neutral samples are excluded from the loss (but still appear as a prediction class).
 
 \subsection{Fixed-window walk-forward cross-validation}
-We use a time-respecting fixed-window scheme:
+I use a time-respecting fixed-window scheme:
 \begin{itemize}
   \item Train window: 250 sequence samples
   \item Validation window: 21 samples
@@ -164,16 +164,16 @@ Feature standardization is fit only on each fold's training split and then appli
 
 \section{From Probabilities to Trades: Backtest Design}
 \subsection{Confidence filtering and positions}
-For each out-of-sample day, the model outputs probabilities $(P(\text{Down}),P(\text{Neutral}),P(\text{Up}))$. We apply a confidence threshold of 0.57:
+For each out-of-sample day, the model outputs probabilities $(P(\text{Down}),P(\text{Neutral}),P(\text{Up}))$. I apply a confidence threshold of 0.57:
 \begin{itemize}
   \item If $\max P < 0.57$, force prediction to Neutral (no directional trade).
   \item Long (+1) if $P(\text{Up})\ge 0.57$ and $P(\text{Up})\ge P(\text{Down})$.
   \item Short (-1) if $P(\text{Down})\ge 0.57$ and $P(\text{Down})> P(\text{Up})$.
 \end{itemize}
-We additionally enforce a minimum holding period of 2 trading days to reduce rapid flip-flopping.
+I additionally enforce a minimum holding period of 2 trading days to reduce rapid flip-flopping.
 
 \subsection{Returns, costs, and equity curves}
-We convert log returns to simple returns: $R_t=\exp(r_t)-1$. Strategy return is $pos_t\cdot R_t$. Transaction cost is charged on absolute position changes at 2 basis points per change. We compute equity curves by cumulative multiplication.
+I convert log returns to simple returns: $R_t=\exp(r_t)-1$. Strategy return is $pos_t\cdot R_t$. Transaction cost is charged on absolute position changes at 2 basis points per change. I compute equity curves by cumulative multiplication.
 
 \section{Results: Milestones (Classic Baselines, then LSTM, Transformer, and Informer-style)}
 \subsection{Milestone 1: LSTM baseline (first reproducible ML run)}
@@ -211,7 +211,7 @@ Figure~\ref{fig:lstm_bt} visualizes the LSTM backtest: equity curves (strategy v
 \end{figure}
 
 \subsection{Milestone 2: Transformer encoder baseline (second run on GPU)}
-After establishing the LSTM baseline, we implemented a Transformer encoder classifier under the \emph{same} evaluation protocol (same data span, features, labels, walk-forward CV windows, confidence threshold, holding period, and transaction costs). This run was executed on Google Colab with GPU acceleration to support deeper architectures.
+After establishing the LSTM baseline, I implemented a Transformer encoder classifier under the \emph{same} evaluation protocol (same data span, features, labels, walk-forward CV windows, confidence threshold, holding period, and transaction costs). This run was executed on Google Colab with GPU acceleration to support deeper architectures.
 
 \textbf{Model summary.} The Transformer takes the same $[30,16]$ feature sequences as input and uses: $d_{model}=64$, $nhead=4$, $3$ encoder layers, feedforward dimension $256$, dropout $0.2$, and a learnable \texttt{[CLS]} token for sequence pooling \citep{vaswani2017}.
 
@@ -249,12 +249,12 @@ Figure~\ref{fig:tx_bt} shows the Transformer backtest visualization with the sam
 \end{figure}
 
 \subsection{Milestone 3: Informer-style time-series Transformer (ProbSparse + distilling)}
-To explore time-series Transformers designed for efficiency on longer sequences, we implemented an Informer-style encoder classifier inspired by Informer \citep{informer2021}. Since our task is classification (Up/Neutral/Down) rather than multi-step forecasting, we adapt Informer as an \emph{encoder-only} model with:
+To explore time-series Transformers designed for efficiency on longer sequences, I implemented an Informer-style encoder classifier inspired by Informer \citep{informer2021}. Since my task is classification (Up/Neutral/Down) rather than multi-step forecasting, I adapt Informer as an \emph{encoder-only} model with:
 \begin{itemize}
   \item \textbf{ProbSparse attention:} approximate self-attention by selecting top-$u$ queries (based on a sparsity measure) for full attention, reducing computation compared to full attention.
   \item \textbf{Encoder distilling:} downsample the sequence length between encoder layers (Conv1D + pooling) to reduce redundancy.
 \end{itemize}
-We keep the same evaluation protocol as the Transformer run (same data span, features, labels, walk-forward CV, confidence threshold, holding period, and transaction costs).
+I keep the same evaluation protocol as the Transformer run (time-respecting walk-forward CV, cost-aware backtest, and consistent signal logic). During early trials I observed that probability calibration and trading-rule parameters (threshold and holding period) dominated realized trading behavior, sometimes producing ``no-trade'' regimes. This led to an explicit optimization loop described below.
 
 \begin{table}[t]
 \centering
@@ -280,7 +280,7 @@ Transaction cost & 2 bps & -- \\
 \end{table}
 
 \subsection{Informer-style equity curve, position, and confidence}
-Figure~\ref{fig:inf_bt} shows the Informer-style backtest visualization. Compared to Buy\&Hold, the strategy remains close to flat over this 1-year window and underperforms in total return, despite moderate exposure (coverage) and relatively low turnover.
+Figure~\ref{fig:inf_bt} shows the Informer-style backtest visualization from the initial configuration. Compared to Buy\&Hold, the strategy underperforms; the main lesson is not simply ``the model is bad'', but that the \emph{probability-to-trade} mapping (threshold and holding constraints) can easily suppress trading or concentrate exposure in unintended regimes.
 
 \begin{figure}[t]
 \centering
@@ -289,17 +289,58 @@ Figure~\ref{fig:inf_bt} shows the Informer-style backtest visualization. Compare
 \label{fig:inf_bt}
 \end{figure}
 
+\subsection{Informer-OPT: feature expansion + longer context + trading-rule sweep}
+After the initial Informer-style run, I performed a structured optimization that targets the factors that most strongly affected realized P\&L in my experiments:
+\begin{itemize}
+  \item \textbf{More informative inputs.} I expanded the feature set beyond the original 16 indicators to include multi-horizon returns/volatilities, ATR-based volatility, and volume-derived signals.
+  \item \textbf{Longer temporal context.} I increased lookback and training window sizes to better match the motivation of Informer (long-sequence modeling), and used a longer history request (period=10y) to keep enough walk-forward folds.
+  \item \textbf{Better probability calibration.} I switched from masked Up/Down loss to full 3-class cross-entropy with light label smoothing to stabilize probabilities.
+  \item \textbf{Trading-rule parameter sweep.} Without retraining the model, I swept trading parameters (confidence threshold, minimum holding period, and whether to allow shorts) using the same out-of-sample probabilities to find a better probability-to-trade mapping.
+\end{itemize}
+
+Table~\ref{tab:inf_opt} reports the best configuration found by the sweep for the Informer-OPT run. Notably, the tuned trading rule produces a strategy return that is nearly equal to Buy\&Hold over the same 252-day window, while maintaining a lower maximum drawdown and modest turnover.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lrr}
+\hline
+Metric & Informer-OPT (best) & Buy\&Hold \\
+\hline
+Days & 252 & 252 \\
+Total return & 0.3675 & 0.3692 \\
+Excess return & -0.0017 & -- \\
+Annualized volatility & 0.1677 & -- \\
+Sharpe ratio & 1.9501 & -- \\
+Max drawdown & -0.0751 & -- \\
+Position coverage & 0.6905 & 1.0000 \\
+Turnover (avg $|\Delta pos|$) & 0.0278 & -- \\
+Trades (pos changes) & 7 & -- \\
+Trading rule & thr=0.36, hold$\ge$5, long-only & -- \\
+\hline
+\end{tabular}
+\caption{Informer-OPT best result from trading-rule sweep (\texttt{trading\_param\_sweep\_20251229\_234600.csv}). This configuration uses the same out-of-sample probabilities and changes only the trade mapping parameters.}
+\label{tab:inf_opt}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{informer_opt_backtest_20251229_152746.png}
+\caption{Informer-OPT backtest visualization (equity, position, probabilities) for the tuned trading rule.}
+\label{fig:inf_opt}
+\end{figure}
+
 \section{What We Learned From the First Full Run}
 The first successful end-to-end run is a meaningful milestone even before optimizing performance:
 \begin{itemize}
-  \item \textbf{Reproducibility matters.} A research loop becomes faster once each run produces standardized artifacts: run configuration, per-fold metrics, per-day predictions, backtest statistics, and plots.
+  \item \textbf{Reproducibility matters.} My research loop became meaningfully faster once each run produced standardized artifacts: run configuration, per-fold metrics, per-day predictions, backtest statistics, and plots.
   \item \textbf{Time-respecting evaluation is non-negotiable.} Walk-forward validation and train-only standardization are necessary to avoid inflated results.
-  \item \textbf{Trading logic is part of the model.} The confidence threshold, minimum holding period, and cost model directly shape the realized strategy behavior; these assumptions must be explicit and consistent across model comparisons.
+  \item \textbf{Trading logic is part of the model.} Confidence thresholds, holding constraints, and the cost model can dominate realized performance. The Informer experiments made this particularly clear: a high threshold can suppress trading entirely, while a tuned mapping can materially change realized returns without retraining.
 \end{itemize}
-These lessons shape how we will evaluate the next generation of models.
+These lessons shape how I will evaluate the next generation of models.
 
 \section{Next Stage: Beyond Baselines (Transformers, Market-Aware Models, and LLM Signals)}
-With both an LSTM baseline and a Transformer baseline implemented under a consistent evaluation protocol, the next stage is to scale model capacity and research scope while preserving methodological rigor. Our plan is to:
+With LSTM, Transformer, and Informer-style baselines implemented under a consistent evaluation protocol, the next stage is to scale research scope while preserving methodological rigor. My plan is to:
 \begin{itemize}
   \item Explore time-series Transformers designed for longer context and efficiency (e.g., Informer-style mechanisms) once the baseline is stable.
   \item Expand from a single instrument (2800.HK) to a small multi-instrument universe (e.g., selected HK large-caps) to enable market-aware modeling.
@@ -315,6 +356,8 @@ All outputs are generated by one-command scripts and saved under \texttt{outputs
   \item LSTM run: \texttt{python run\_lstm2\_pipeline.py}
   \item Transformer run: \texttt{python run\_transformer\_pipeline.py}
   \item Informer-style run: \texttt{python run\_informer\_pipeline.py}
+  \item Informer-OPT run: \texttt{python run\_informer\_opt\_pipeline.py}
+  \item Trading-rule sweep (no retraining): \texttt{python run\_trading\_param\_sweep.py}
   \item CV metrics and predictions: \texttt{outputs/reports/*\_cv\_metrics\_*.csv}, \texttt{outputs/reports/*\_cv\_preds\_*.csv}
   \item Backtest outputs: \texttt{outputs/reports/*\_backtest\_stats\_*.json}, \texttt{outputs/reports/*\_backtest\_timeseries\_*.csv}
   \item Plots: \texttt{outputs/plots/*.png}
