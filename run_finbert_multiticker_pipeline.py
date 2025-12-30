@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 
 from fyp_trading.config import LabelingConfig, PipelineConfig, TrainConfig
+from fyp_trading.news import aggregate_news_per_day, load_news
 from fyp_trading.news import NewsConfig
 from fyp_trading.news_labels import build_news_training_table, build_price_label_table_for_universe
 from fyp_trading.portfolio import portfolio_backtest_equal_weight_from_preds
@@ -86,12 +87,47 @@ def main() -> None:
     train_df = df[df["date"].isin(train_dates)].copy()
     test_df = df[df["date"].isin(test_dates)].copy()
 
+    # 2.5) Alignment diagnostics (news coverage vs price coverage vs join coverage)
+    # Raw news per day
+    news_raw = load_news(news_cfg)
+    news_daily = aggregate_news_per_day(news_raw)
+    # Price returns table
+    price_tbl_full = build_price_label_table_for_universe(uni.tickers, uni.period, uni.interval, label_cfg)
+    price_tbl_full["date"] = pd.to_datetime(price_tbl_full["date"]).dt.tz_localize(None)
+    news_daily["date"] = pd.to_datetime(news_daily["date"]).dt.tz_localize(None)
+
+    join_daily = news_daily.merge(price_tbl_full[["date", "ticker"]], on=["date", "ticker"], how="inner")
+    by_ticker = []
+    for t in uni.tickers:
+        n_news = int((news_daily["ticker"] == t).sum())
+        n_price = int((price_tbl_full["ticker"] == t).sum())
+        n_join = int((join_daily["ticker"] == t).sum())
+        by_ticker.append({"ticker": t, "news_days": n_news, "price_days": n_price, "join_days": n_join})
+
+    align_report = {
+        "universe": uni.tickers,
+        "news_raw_rows": int(len(news_raw)),
+        "news_daily_rows": int(len(news_daily)),
+        "price_rows": int(len(price_tbl_full)),
+        "join_rows": int(len(join_daily)),
+        "train_rows": int(len(train_df)),
+        "test_rows": int(len(test_df)),
+        "train_unique_dates": int(pd.Index(train_df["date"].unique()).nunique()),
+        "test_unique_dates": int(pd.Index(test_df["date"].unique()).nunique()),
+        "per_ticker": by_ticker,
+        "note": "join_days counts per-(date,ticker) where both news and price label exist.",
+    }
+    save_json(reports_dir / f"finbert_data_alignment_{ts}.json", align_report)
+    print("[ALIGN] news_daily rows:", len(news_daily), "price rows:", len(price_tbl_full), "join rows:", len(join_daily))
+    print("[ALIGN] train rows:", len(train_df), "test rows:", len(test_df))
+
     # 3) Fine-tune (simple, HuggingFace Trainer)
     tok = finbert_tokenizer(fm_cfg)
     model = finbert_model(fm_cfg, num_labels=3)
 
     # Minimal Trainer loop (optional; requires transformers + datasets + accelerate)
     try:
+        import inspect
         import torch
         from datasets import Dataset  # type: ignore
         from transformers import TrainingArguments, Trainer  # type: ignore
@@ -107,19 +143,29 @@ def main() -> None:
         train_ds.set_format(type="torch", columns=cols)
         test_ds.set_format(type="torch", columns=cols)
 
-        args = TrainingArguments(
-            output_dir=str(models_dir / f"finbert_ckpt_{ts}"),
-            per_device_train_batch_size=fm_cfg.batch_size,
-            per_device_eval_batch_size=fm_cfg.batch_size,
-            learning_rate=fm_cfg.lr,
-            num_train_epochs=fm_cfg.epochs,
-            weight_decay=fm_cfg.weight_decay,
-            evaluation_strategy="epoch",
-            save_strategy="epoch",
-            logging_strategy="epoch",
-            report_to=[],
-            seed=fm_cfg.seed,
-        )
+        # Make TrainingArguments compatible across transformers versions by filtering kwargs
+        base_kwargs = {
+            "output_dir": str(models_dir / f"finbert_ckpt_{ts}"),
+            "per_device_train_batch_size": fm_cfg.batch_size,
+            "per_device_eval_batch_size": fm_cfg.batch_size,
+            "learning_rate": fm_cfg.lr,
+            "num_train_epochs": fm_cfg.epochs,
+            "weight_decay": fm_cfg.weight_decay,
+            "seed": fm_cfg.seed,
+            # common logging/save behavior (may not exist in older versions)
+            "evaluation_strategy": "epoch",
+            "save_strategy": "epoch",
+            "logging_strategy": "epoch",
+            "report_to": [],
+        }
+        sig = inspect.signature(TrainingArguments.__init__)
+        supported = set(sig.parameters.keys())
+        # Some versions use 'eval_strategy' instead of 'evaluation_strategy'
+        if "evaluation_strategy" not in supported and "eval_strategy" in supported:
+            base_kwargs["eval_strategy"] = base_kwargs.pop("evaluation_strategy")
+        # Filter unsupported keys
+        kwargs = {k: v for k, v in base_kwargs.items() if k in supported}
+        args = TrainingArguments(**kwargs)
 
         def compute_metrics(eval_pred):
             logits, labels = eval_pred
@@ -155,7 +201,7 @@ def main() -> None:
     )
 
     # 5) Portfolio backtest (equal-weight across tickers)
-    price_tbl = build_price_label_table_for_universe(uni.tickers, uni.period, uni.interval, label_cfg)
+    price_tbl = price_tbl_full  # reuse computed table (saves time and ensures consistent alignment stats)
     returns_df = price_tbl[["date", "ticker", "simple_return"]].copy()
     bt_df, bt_stats = portfolio_backtest_equal_weight_from_preds(
         preds_df=preds_df,
@@ -177,6 +223,11 @@ def main() -> None:
     bt_stats_path = reports_dir / f"finbert_portfolio_backtest_stats_{ts}.json"
     bt_df.to_csv(bt_ts_path, index=False)
     save_json(bt_stats_path, bt_stats)
+    if float(bt_stats.get("days", 0.0)) < float(pipe_cfg.backtest_days):
+        print(
+            f"[WARN] Backtest days={bt_stats.get('days')} < backtest_days={pipe_cfg.backtest_days}. "
+            "This usually means the news/price overlap in the test split is too small."
+        )
 
     # Save model weights (best effort)
     try:
