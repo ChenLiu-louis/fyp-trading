@@ -1,0 +1,245 @@
+% Compile with PDFLaTeX on Overleaf.
+% This is a Beamer slide deck (PDF "PPT") based on the interim report progress.
+%
+% IMPORTANT (Overleaf):
+% - Upload this .tex file AND the referenced images (see list near bottom).
+% - Use Compiler: pdfLaTeX
+
+\documentclass[aspectratio=169]{beamer}
+
+% Theme: clean + readable
+\usetheme{Madrid}
+\usecolortheme{default}
+\setbeamertemplate{navigation symbols}{}
+
+\usepackage[hyphens]{url}
+\usepackage{graphicx}
+\usepackage{amsmath}
+
+% --- Optional speaker notes ---
+% Uncomment the next 2 lines if you want notes pages in the PDF.
+% \usepackage{pgfpages}
+% \setbeameroption{show notes}
+
+\title[COMP4913 Interim]{From Classic Strategies to Time-Series Transformers\\A Quantitative Trading System (Interim Milestone)}
+\author{Liu Chen}
+\institute{Department of Computing, The Hong Kong Polytechnic University}
+\date{Interim Presentation (10 minutes)}
+
+\begin{document}
+
+% ---------------- Slide 1 ----------------
+\begin{frame}
+  \titlepage
+  \note{
+  Good morning. Today I will present my interim milestone for a quantitative trading system.
+  I start from classic strategies, then move to LSTM and Transformers, and finally integrate a news module using FinBERT.
+  My main instrument is 2800.HK, a liquid ETF tracking the Hang Seng Index.
+  }
+\end{frame}
+
+% ---------------- Slide 2 ----------------
+\begin{frame}{Agenda (10 minutes)}
+  \begin{itemize}
+    \item Motivation \& midterm goal (system milestone)
+    \item Data \& evaluation protocol (no leakage)
+    \item Baselines: classic $\rightarrow$ LSTM $\rightarrow$ Transformer $\rightarrow$ Informer $\rightarrow$ Informer-OPT
+    \item News stage: GDELT + FinBERT (current limitation)
+    \item Key lessons \& next steps
+  \end{itemize}
+  \note{
+  I will explain motivation and the time-respecting evaluation design.
+  Then I summarize results from classic strategies and ML/DL models under the same backtest rules.
+  Finally I present the news module status and the next steps.
+  }
+\end{frame}
+
+% ---------------- Slide 3 ----------------
+\begin{frame}{Motivation \& Midterm Objective}
+  \begin{itemize}
+    \item Markets are noisy; persistent alpha is difficult (EMH)
+    \item Midterm focus: build the research engine
+      \begin{itemize}
+        \item time-respecting evaluation (walk-forward CV)
+        \item reproducible outputs (configs, metrics, plots)
+        \item consistent trading rules (probabilities $\rightarrow$ positions)
+      \end{itemize}
+    \item Goal: compare models fairly under the same framework
+  \end{itemize}
+  \note{
+  My goal at midterm is not to claim final alpha yet, but to build a reliable and reproducible evaluation pipeline.
+  The key is to keep the protocol fixed so changes reflect the model, not evaluation differences.
+  }
+\end{frame}
+
+% ---------------- Slide 4 ----------------
+\begin{frame}{Data, Labels, and Evaluation (No Look-Ahead)}
+  \begin{itemize}
+    \item Data: daily OHLCV from \texttt{yfinance} (2800.HK)
+    \item Target: next-day log return \(\; r_{t+1}=\log(C_{t+1}/C_t)\)
+    \item Labels: volatility-adaptive 3-class (Up / Neutral / Down)
+    \item Evaluation: fixed-window walk-forward CV
+      \begin{itemize}
+        \item train $\rightarrow$ val $\rightarrow$ test, rolling forward
+        \item scaler fit on train only
+      \end{itemize}
+  \end{itemize}
+  \note{
+  The dynamic threshold uses recent volatility (shifted to avoid leakage).
+  Walk-forward CV ensures each test window is strictly in the future.
+  }
+\end{frame}
+
+% ---------------- Slide 5 ----------------
+\begin{frame}{From Probabilities to Trades (Backtest Layer)}
+  \begin{itemize}
+    \item Model outputs \(P(\text{Down}), P(\text{Neutral}), P(\text{Up})\)
+    \item Confidence threshold: if \(\max P < \text{thr}\) $\rightarrow$ Neutral (no trade)
+    \item Position mapping: Long / Short / Flat
+    \item Constraints: min holding period + 2 bps transaction cost
+    \item Key point: trading rule can dominate realized P\&L
+  \end{itemize}
+  \note{
+  Even with the same model outputs, changing the threshold and holding constraints can dramatically change coverage and returns.
+  This became very clear in the Informer experiments.
+  }
+\end{frame}
+
+% ---------------- Slide 6 ----------------
+\begin{frame}{Classic Strategy Baselines (Interpretability First)}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \textbf{Why classic baselines first}
+      \begin{itemize}
+        \item validate backtest mechanics
+        \item build intuition for 2800.HK
+        \item transparent benchmarks
+      \end{itemize}
+      \vspace{6pt}
+      \textbf{Takeaway:} some rules show high Sharpe but low coverage.
+    \end{column}
+    \begin{column}{0.52\textwidth}
+      \includegraphics[width=\linewidth]{classic_rsi_backtest_20251229_220548.png}
+    \end{column}
+  \end{columns}
+  \note{
+  RSI mean-reversion trades rarely, which can produce a nice Sharpe but low total return compared with buy-and-hold in an upward market.
+  }
+\end{frame}
+
+% ---------------- Slide 7 ----------------
+\begin{frame}{LSTM Baseline (First End-to-End ML Run)}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \begin{itemize}
+        \item Input: lookback=30, 16 technical features
+        \item Model: PyTorch LSTM classifier
+        \item OOS 252 days:
+          \begin{itemize}
+            \item Total return: \textbf{-6.23\%}
+            \item Coverage: \textbf{25.4\%}
+            \item Sharpe: \textbf{-0.57}
+          \end{itemize}
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.52\textwidth}
+      \includegraphics[width=\linewidth]{lstm2_backtest_20251229_183712.png}
+    \end{column}
+  \end{columns}
+  \note{
+  The key milestone is reproducibility: the pipeline produces CV metrics, OOS probabilities, and standardized backtest artifacts.
+  Performance is not the focus yet; the system is.
+  }
+\end{frame}
+
+% ---------------- Slide 8 ----------------
+\begin{frame}{Transformer Encoder Baseline (GPU Run)}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \begin{itemize}
+        \item Same protocol as LSTM (fair comparison)
+        \item Model: Transformer encoder (self-attention)
+        \item OOS 252 days:
+          \begin{itemize}
+            \item Total return: \textbf{+0.94\%}
+            \item Coverage: \textbf{62.3\%}
+            \item Sharpe: \textbf{0.15}
+          \end{itemize}
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.52\textwidth}
+      \includegraphics[width=\linewidth]{transformer_backtest_20251229_125307.png}
+    \end{column}
+  \end{columns}
+  \note{
+  Transformer improves coverage and slightly improves returns, but still trails buy-and-hold.
+  This motivates focusing on calibration and the trading translation layer.
+  }
+\end{frame}
+
+% ---------------- Slide 9 ----------------
+\begin{frame}{Informer \& Informer-OPT (Trading Layer Matters)}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \textbf{Informer-style (baseline)}
+      \begin{itemize}
+        \item ProbSparse attention + distilling (classification adaptation)
+        \item OOS 252 days: Total return \textbf{-1.02\%}, Coverage \textbf{42.1\%}
+      \end{itemize}
+      \vspace{4pt}
+      \textbf{Informer-OPT (best from sweep)}
+      \begin{itemize}
+        \item Total return: \textbf{36.75\%} vs Buy\&Hold \textbf{36.92\%}
+        \item Sharpe: \textbf{1.95}, Max DD: \textbf{-7.51\%}
+        \item Rule: thr=0.36, hold$\ge$5, long-only
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.52\textwidth}
+      \includegraphics[width=\linewidth]{informer_opt_backtest_20251229_152746.png}
+    \end{column}
+  \end{columns}
+  \note{
+  The important lesson is that a tuned probability-to-trade mapping can change realized performance significantly without retraining the model.
+  This must be handled carefully to avoid overfitting at the trading layer.
+  }
+\end{frame}
+
+% ---------------- Slide 10 ----------------
+\begin{frame}{News Stage (GDELT + FinBERT) \& Next Steps}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.50\textwidth}
+      \textbf{Motivation}
+      \begin{itemize}
+        \item add external signal beyond price/indicators
+        \item 2800.HK is index ETF $\rightarrow$ macro/news can influence flows
+      \end{itemize}
+      \textbf{Pipeline}
+      \begin{itemize}
+        \item fetch news: GDELT DOC API
+        \item aggregate daily text per (date,ticker)
+        \item fine-tune FinBERT for 3-class direction
+      \end{itemize}
+      \textbf{Current limitation:} short OOS overlap (coverage issue)
+      \vspace{4pt}
+      \textbf{Next steps:} expand news coverage; add PatchTST baseline under same protocol
+    \end{column}
+    \begin{column}{0.50\textwidth}
+      \includegraphics[width=\linewidth]{finbert_portfolio_backtest_20251230_143439.png}
+    \end{column}
+  \end{columns}
+  \note{
+  This stage is currently a systems milestone. Once coverage is sufficient, I will evaluate the news signal more reliably and compare it against strong price-only baselines.
+  }
+\end{frame}
+
+\end{document}
+
+% ---------------- Overleaf image upload checklist ----------------
+% Upload these files into the SAME Overleaf project directory as this .tex file:
+% - classic_rsi_backtest_20251229_220548.png
+% - lstm2_backtest_20251229_183712.png
+% - transformer_backtest_20251229_125307.png
+% - informer_opt_backtest_20251229_152746.png
+% - finbert_portfolio_backtest_20251230_143439.png
+
+

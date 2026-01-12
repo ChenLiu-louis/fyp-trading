@@ -9,8 +9,10 @@ xgboost
 requests
 charset_normalizer
 
-# Optional (next-stage: pretrained foundation models / FinBERT fine-tuning)
-# transformers
+# Required for Informer+Sentiment pipeline (FinBERT feature extraction)
+transformers
+
+# Optional (only needed for FinBERT fine-tuning pipeline)
 # datasets
 # accelerate
 # sentencepiece

@@ -40,18 +40,18 @@ Supervisor: Prof.\ Henry C.\ B.\ Chan\\
 \maketitle
 
 \begin{abstract}
-This midterm report presents my first end-to-end milestone of a quantitative algorithmic trading system prototype. Using 2800.HK daily OHLCV data, I began with classic rule-based strategy baselines (RSI, Bollinger mean-reversion, dual moving-average trend, and Donchian breakouts) to establish an interpretability-first benchmark. I then built a complete ML workflow: data ingestion, technical feature engineering, volatility-adaptive 3-class labeling, fixed-window walk-forward cross-validation, and a cost-aware backtest driven by out-of-sample probabilities. Finally, I explored time-series Transformers (Transformer encoder and an Informer-style model), and learned that much of realized performance comes from the \emph{translation layer} between probabilities and trades. I conclude with an Informer-OPT result refined via trading-rule parameter sweeping, and a clear plan for next-stage research built on reproducible, time-respecting evaluation.
+This midterm report presents my first end-to-end milestone of a quantitative algorithmic trading system prototype. Using 2800.HK daily OHLCV data, I began with classic rule-based strategy baselines (RSI, Bollinger mean-reversion, dual moving-average trend, and Donchian breakouts) to establish an interpretability-first benchmark. I then built a complete ML workflow---data ingestion, technical feature engineering, volatility-adaptive 3-class labeling, fixed-window walk-forward cross-validation, and a cost-aware backtest driven by out-of-sample probabilities. Next, I explored time-series Transformers (a Transformer encoder and an Informer-style model), and learned that realized performance is often dominated by the \emph{translation layer} between probabilities and trades (thresholds, holding constraints, and costs). I conclude with an Informer-OPT result refined via trading-rule parameter sweeping, and an initial ``news as an external signal'' stage (FinBERT + GDELT) that successfully integrates the pipeline but is not yet performance-conclusive due to limited news coverage.
 \end{abstract}
 
 \section{Project Motivation and Midterm Goal}
-Financial markets are complex, noisy, and impacted by many interacting factors. While the Efficient Market Hypothesis suggests persistent alpha is difficult, short-horizon patterns may exist and can be explored through careful modeling and robust backtesting. The long-term goal of this project is to design and evaluate a complete data-driven trading system. My midterm goal is more concrete: build a pipeline that is (i) time-respecting (no lookahead leakage), (ii) reproducible, and (iii) able to generate standardized artifacts (metrics, plots, logs) for iterative research.
+Financial markets are complex, noisy, and shaped by many interacting factors. While the Efficient Market Hypothesis argues that persistent alpha is difficult \citep{fama1970}, practical research can still focus on short-horizon signals and disciplined evaluation. The long-term goal of this project is to design and evaluate a complete data-driven trading system; my midterm goal is more concrete: build a pipeline that is (i) time-respecting (no lookahead leakage), (ii) reproducible, and (iii) able to generate standardized artifacts (metrics, plots, logs) for iterative research. I treat this report as a story of \emph{system-building}: starting from simple, interpretable baselines, then increasing model capacity only after the evaluation framework is stable.
 
 \section{Data and Problem Setup}
 \textbf{Instrument.} 2800.HK (Tracker Fund of Hong Kong), chosen for liquidity and relevance as a Hang Seng Index proxy.
 
 \textbf{Data source.} Daily OHLCV from \texttt{yfinance} with auto-adjusted prices.
 
-\textbf{Time span.} I started with three years of daily bars (period=3y, interval=1d), yielding 733 observations in the initial milestone runs. Later, when optimizing the Informer-style model with longer context windows, I expanded the data request to a longer history (period=10y) to ensure enough out-of-sample folds; final comparisons are always reported on a cost-aware backtest window of the last 252 trading days for the corresponding run.
+\textbf{Time span and evaluation window.} Most early experiments (classic baselines, LSTM, and the first Transformer/Informer runs) use three years of daily bars (period=3y, interval=1d), yielding 733 observations. When optimizing Informer with longer context and larger training windows, I expanded the data request to a longer history (period=10y) to preserve enough out-of-sample folds. For ML/DL models, I always report a cost-aware backtest on the \emph{out-of-sample} window produced by walk-forward CV; in this report, the headline comparison is typically the last 252 out-of-sample trading days for the corresponding run.
 
 \textbf{Prediction target.} Next-day close-to-close log return:
 \[
@@ -84,7 +84,7 @@ Labels are assigned as:
 This produces a 3-class classification task where Neutral corresponds to small moves and Up/Down correspond to larger directional moves.
 
 \section{Classic Quantitative Strategy Exploration (Pre-ML Baselines)}
-Before training any ML/DL models, I implemented and backtested several classic, interpretable strategies to (i) validate the data pipeline end-to-end, (ii) build intuition for 2800.HK dynamics, and (iii) set realistic benchmarks for later ML/DL comparisons \citep{chan2013}. These baselines are not optimized; the goal is to establish a transparent ``first ruler''.
+Before training any ML/DL models, I implemented and backtested several classic, interpretable strategies to (i) validate the research loop end-to-end, (ii) build intuition for 2800.HK dynamics, and (iii) set realistic benchmarks for later ML/DL comparisons \citep{chan2013}. These baselines are not optimized; they are meant to be a transparent ``first ruler''.
 
 \subsection{Backtest setup (aligned assumptions)}
 All classic strategies use the same close-to-close return definition and cost model:
@@ -175,7 +175,7 @@ I additionally enforce a minimum holding period of 2 trading days to reduce rapi
 \subsection{Returns, costs, and equity curves}
 I convert log returns to simple returns: $R_t=\exp(r_t)-1$. Strategy return is $pos_t\cdot R_t$. Transaction cost is charged on absolute position changes at 2 basis points per change. I compute equity curves by cumulative multiplication.
 
-\section{Results: Milestones (Classic Baselines, then LSTM, Transformer, and Informer-style)}
+\section{Results: ML/DL Milestones Under a Consistent Protocol}
 \subsection{Milestone 1: LSTM baseline (first reproducible ML run)}
 The first successful end-to-end run used an LSTM classifier and produced a complete set of standardized artifacts (configuration snapshot, walk-forward CV metrics, per-day probabilities, and backtest outputs). Table~\ref{tab:lstm_bt} summarizes the cost-aware backtest metrics over the last 252 trading days (approximately 1 year), compared to a Buy\&Hold benchmark.
 
@@ -211,7 +211,7 @@ Figure~\ref{fig:lstm_bt} visualizes the LSTM backtest: equity curves (strategy v
 \end{figure}
 
 \subsection{Milestone 2: Transformer encoder baseline (second run on GPU)}
-After establishing the LSTM baseline, I implemented a Transformer encoder classifier under the \emph{same} evaluation protocol (same data span, features, labels, walk-forward CV windows, confidence threshold, holding period, and transaction costs). This run was executed on Google Colab with GPU acceleration to support deeper architectures.
+After establishing the LSTM baseline, I implemented a Transformer encoder classifier under the \emph{same} evaluation protocol (same features, labels, walk-forward CV windows, confidence threshold, holding period, and transaction costs). This run was executed on Google Colab with GPU acceleration to support deeper architectures.
 
 \textbf{Model summary.} The Transformer takes the same $[30,16]$ feature sequences as input and uses: $d_{model}=64$, $nhead=4$, $3$ encoder layers, feedforward dimension $256$, dropout $0.2$, and a learnable \texttt{[CLS]} token for sequence pooling \citep{vaswani2017}.
 
@@ -254,7 +254,7 @@ To explore time-series Transformers designed for efficiency on longer sequences,
   \item \textbf{ProbSparse attention:} approximate self-attention by selecting top-$u$ queries (based on a sparsity measure) for full attention, reducing computation compared to full attention.
   \item \textbf{Encoder distilling:} downsample the sequence length between encoder layers (Conv1D + pooling) to reduce redundancy.
 \end{itemize}
-I keep the same evaluation protocol as the Transformer run (time-respecting walk-forward CV, cost-aware backtest, and consistent signal logic). During early trials I observed that probability calibration and trading-rule parameters (threshold and holding period) dominated realized trading behavior, sometimes producing ``no-trade'' regimes. This led to an explicit optimization loop described below.
+I keep the same evaluation protocol as the Transformer run (time-respecting walk-forward CV, cost-aware backtest, and consistent signal logic). During early trials I observed that trading-rule parameters (confidence threshold and holding period) could dominate realized behavior, sometimes producing ``no-trade'' regimes. This led to an explicit optimization loop described below, which I treat as a practical lesson about backtesting: it is easy to overfit the trading layer if I do not separate model training from downstream decision calibration \citep{bailey2014,lopezdeprado2018}.
 
 \begin{table}[t]
 \centering
@@ -330,22 +330,42 @@ Trading rule & thr=0.36, hold$\ge$5, long-only & -- \\
 \label{fig:inf_opt}
 \end{figure}
 
-\section{What We Learned From the First Full Run}
+\subsection{Milestone 4: News as an external signal (FinBERT integration, early stage)}
+After building price-only baselines, I explored whether \emph{news sentiment} can provide an external signal beyond technical indicators. Conceptually, 2800.HK is an index-tracking ETF whose short-horizon movements can be influenced by macro and market news. My goal in this stage is not to claim a strong alpha from news immediately, but to \emph{integrate} a scalable news-to-trade workflow that can later be improved with more data and stronger fine-tuning.
+
+\textbf{News acquisition.} I used the public GDELT 2.1 Document API to fetch news articles, mapped them to HK tickers via alias queries, and aggregated multiple items per (date,ticker) into a daily text blob. The processed dataset is written to \texttt{data/news/news.csv} with schema \texttt{date,ticker,text}.
+
+\textbf{Pretrained model and fine-tuning objective.} I used a pretrained financial language model (FinBERT; \texttt{ProsusAI/finbert}) \citep{araci2019finbert} and attempted to fine-tune it to predict my 3-class next-day direction label (Down/Neutral/Up). This treats the task as ``news sentiment / news signal'' classification aligned to next-day price movement. The pipeline converts model probabilities into trading positions using the same confidence-threshold and minimum-holding logic as the price-based ML runs, and evaluates a cost-aware backtest.
+
+\textbf{Multi-ticker portfolio link.} To connect news signals to a practical setting, I evaluated an equal-weight portfolio across a small HK universe (including 2800.HK and several large-cap constituents), so that news coverage and signal behavior could be studied in a multi-asset context rather than a single instrument.
+
+\textbf{Current result and what it means.} In the latest run, the system produced a complete set of artifacts (config, predictions, alignment diagnostics, and portfolio backtest). However, the out-of-sample backtest window was only 12 trading days because the news--price overlap was limited (only 163 ticker-day news items, with 12 unique dates in the test split). As a result, performance metrics are not statistically meaningful yet; the main milestone is that the pipeline is now reproducible and debuggable. Figure~\ref{fig:finbert_bt} visualizes the short-window portfolio backtest, and \texttt{outputs/reports/finbert\_data\_alignment\_20251230\_143439.json} records per-ticker news coverage and join counts. This stage reinforces a simple point: without enough aligned samples, even a strong pretrained model cannot be evaluated fairly.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{finbert_portfolio_backtest_20251230_143439.png}
+\caption{FinBERT-news portfolio backtest visualization (short window due to limited news coverage).}
+\label{fig:finbert_bt}
+\end{figure}
+
+\textbf{Key lesson.} In this stage, I learned that \emph{data coverage and alignment} are as important as model choice: to evaluate a news-based signal fairly, I need (i) a much larger and longer news dataset across HK tickers, and (ii) a stable fine-tuning environment (e.g., Colab) so that Trainer-based fine-tuning runs reliably.
+
+\section{What I Learned From the First Full Run}
 The first successful end-to-end run is a meaningful milestone even before optimizing performance:
 \begin{itemize}
   \item \textbf{Reproducibility matters.} My research loop became meaningfully faster once each run produced standardized artifacts: run configuration, per-fold metrics, per-day predictions, backtest statistics, and plots.
-  \item \textbf{Time-respecting evaluation is non-negotiable.} Walk-forward validation and train-only standardization are necessary to avoid inflated results.
-  \item \textbf{Trading logic is part of the model.} Confidence thresholds, holding constraints, and the cost model can dominate realized performance. The Informer experiments made this particularly clear: a high threshold can suppress trading entirely, while a tuned mapping can materially change realized returns without retraining.
+  \item \textbf{Time-respecting evaluation is non-negotiable.} Walk-forward validation and train-only standardization are necessary to avoid inflated results \citep{bergmeir2018}.
+  \item \textbf{The trading layer can dominate.} Confidence thresholds, holding constraints, and trading frictions can dominate realized performance. The Informer experiments made this particularly clear: a high threshold can suppress trading entirely, while a tuned mapping can materially change realized returns without retraining.
 \end{itemize}
 These lessons shape how I will evaluate the next generation of models.
 
 \section{Next Stage: Beyond Baselines (Transformers, Market-Aware Models, and LLM Signals)}
 With LSTM, Transformer, and Informer-style baselines implemented under a consistent evaluation protocol, the next stage is to scale research scope while preserving methodological rigor. My plan is to:
 \begin{itemize}
-  \item Explore time-series Transformers designed for longer context and efficiency (e.g., Informer-style mechanisms) once the baseline is stable.
-  \item Expand from a single instrument (2800.HK) to a small multi-instrument universe (e.g., selected HK large-caps) to enable market-aware modeling.
-  \item Evaluate market-guided Transformer variants (e.g., MASTER-style ideas) when cross-sectional information becomes available.
-  \item Investigate LLM-based feature extraction as an auxiliary signal source (e.g., structured summaries or sentiment proxies), while enforcing strict anti-leakage constraints in the research design.
+  \item Expand the news dataset (longer time span, broader HK coverage) so that the FinBERT stage becomes statistically evaluable rather than only a systems milestone \citep{leetaru2013gdelt,araci2019finbert}.
+  \item Move from single-instrument research (2800.HK) to a small multi-instrument HK universe, and evaluate portfolio-level decisions consistently under costs.
+  \item Explore time-series Transformer variants with longer context and better calibration, while keeping the walk-forward protocol fixed to avoid ``metric drift'' from changing evaluation rules \citep{bailey2014,lopezdeprado2018}.
+  \item Investigate LLM-based feature extraction as an auxiliary signal source (e.g., robust event tags or sentiment proxies), while enforcing strict anti-leakage constraints in the research design.
 \end{itemize}
 This progression reflects a ``growth path'' from simple, interpretable baselines to higher-capacity models, with the evaluation framework kept consistent to ensure fair comparisons.
 
@@ -376,6 +396,21 @@ Chan, E. P. 2013.
 \textit{Algorithmic Trading: Winning Strategies and Their Rationale}.
 John Wiley \& Sons.
 
+\bibitem[Bergmeir, Hyndman, and Koo 2018]{bergmeir2018}
+Bergmeir, C.; Hyndman, R. J.; and Koo, B. 2018.
+A note on the validity of cross-validation for evaluating autoregressive time series prediction.
+\textit{Computational Statistics \& Data Analysis} 120:70--83.
+
+\bibitem[Bailey et al.\ 2014]{bailey2014}
+Bailey, D. H.; Borwein, J. M.; López de Prado, M.; and Zhu, Q. J. 2014.
+The probability of backtest overfitting.
+\textit{Journal of Computational Finance} 20(4):39--69.
+
+\bibitem[López de Prado 2018]{lopezdeprado2018}
+López de Prado, M. 2018.
+\textit{Advances in Financial Machine Learning}.
+John Wiley \& Sons.
+
 \bibitem[Hochreiter and Schmidhuber 1997]{lstm1997}
 Hochreiter, S.; and Schmidhuber, J. 1997.
 Long short-term memory.
@@ -390,6 +425,16 @@ In \textit{Advances in Neural Information Processing Systems (NeurIPS)}.
 Zhou, H.; Zhang, S.; Peng, J.; Zhang, S.; Li, J.; Xiong, H.; and Zhang, W. 2021.
 Informer: Beyond Efficient Transformer for Long Sequence Time-Series Forecasting.
 In \textit{Proceedings of AAAI}.
+
+\bibitem[Araci 2019]{araci2019finbert}
+Araci, D. 2019.
+FinBERT: Financial sentiment analysis with pre-trained language models.
+\textit{arXiv preprint arXiv:1908.10063}.
+
+\bibitem[Leetaru and Schrodt 2013]{leetaru2013gdelt}
+Leetaru, K.; and Schrodt, P. A. 2013.
+GDELT: Global data on events, location, and tone.
+In \textit{ISA Annual Convention (poster)}.
 \end{thebibliography}
 
 \end{document}

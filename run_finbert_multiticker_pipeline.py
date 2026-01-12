@@ -121,6 +121,20 @@ def main() -> None:
     print("[ALIGN] news_daily rows:", len(news_daily), "price rows:", len(price_tbl_full), "join rows:", len(join_daily))
     print("[ALIGN] train rows:", len(train_df), "test rows:", len(test_df))
 
+    # Guardrail: ensure the test split has enough unique dates to be meaningful.
+    # User goal: backtest days > 14. A strict minimum of 15 unique test dates is a reasonable sanity threshold.
+    min_test_unique_dates = 15
+    if align_report["test_unique_dates"] < min_test_unique_dates:
+        raise RuntimeError(
+            f"News-price overlap in test split is too small: test_unique_dates={align_report['test_unique_dates']} "
+            f"< {min_test_unique_dates}.\n"
+            "Fix: fetch more news (longer time span / more pages per slice) and re-run.\n"
+            "Suggested commands:\n"
+            "  python run_fetch_news_gdelt.py --slice-days 14 --pages-per-slice 10 --start 20180101000000 --end 20251231235959\n"
+            "Then re-run:\n"
+            "  python run_finbert_multiticker_pipeline.py\n"
+        )
+
     # 3) Fine-tune (simple, HuggingFace Trainer)
     tok = finbert_tokenizer(fm_cfg)
     model = finbert_model(fm_cfg, num_labels=3)

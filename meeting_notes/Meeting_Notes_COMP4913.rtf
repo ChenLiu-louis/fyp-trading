@@ -1,0 +1,151 @@
+{\rtf1\ansi\deff0
+{\fonttbl{\f0 Times New Roman;}}
+\fs24\f0
+\b COMP4913 Capstone Project — Meeting Notes\b0\par
+Topic: Quantitative Trading System (2800.HK, ML/DL baselines, Transformers, and News/NLP)\par
+\par
+\page
+\b Meeting: Supervisor Meeting — 2025-09-20\b0\par
+Attendees: Liu Chen; Prof. Henry C. B. Chan\par
+\par
+\b Agenda\b0\par
+\bullet\tab Confirm project scope and deliverables (interim/final report, presentation, code artifacts)\par
+\bullet\tab Decide target instrument(s) and initial baseline plan\par
+\par
+\b Progress Since Last Meeting\b0\par
+\bullet\tab Set up repository structure and outputs logging convention (configs, metrics, plots).\par
+\bullet\tab Selected 2800.HK as a liquid HSI proxy for initial single-instrument study.\par
+\par
+\b Discussion / Supervisor Feedback\b0\par
+\bullet\tab Supervisor emphasized time-series evaluation must avoid look-ahead bias; use walk-forward CV rather than random split.\par
+\bullet\tab Agree to start with classic strategies before ML for interpretability and sanity checks.\par
+\par
+\b Decisions\b0\par
+\bullet\tab Use daily OHLCV data (yfinance) as primary data source at interim stage.\par
+\bullet\tab Implement classic baselines (RSI/MACD/Bollinger/Dual-MA/Donchian) and a unified backtest function with transaction costs.\par
+\par
+\b Action Items (Next Steps)\b0\par
+\bullet\tab Implement classic strategy runners and export plots/tables to outputs/.\par
+\bullet\tab Draft interim report outline and keep the narrative progressive (classic → ML/DL).\par
+\par
+\page
+\b Meeting: Supervisor Meeting — 2025-10-10\b0\par
+Attendees: Liu Chen; Prof. Henry C. B. Chan\par
+\par
+\b Agenda\b0\par
+\bullet\tab Review classic strategy results vs Buy&Hold\par
+\bullet\tab Discuss ML baseline design (labels, features, walk-forward)\par
+\par
+\b Progress Since Last Meeting\b0\par
+\bullet\tab Implemented and ran classic strategies; exported equity curves and summary tables.\par
+\bullet\tab Observed several strategies show decent Sharpe but low coverage/exposure.\par
+\par
+\b Discussion / Supervisor Feedback\b0\par
+\bullet\tab Supervisor noted that low coverage may look good on Sharpe but will lag Buy&Hold in trending markets.\par
+\bullet\tab Discussed 3-class labeling (Up/Neutral/Down) to avoid forcing trades during small moves.\par
+\par
+\b Decisions\b0\par
+\bullet\tab Adopt volatility-adaptive dynamic threshold labeling using rolling volatility (shifted to avoid leakage).\par
+\bullet\tab Use a cost-aware backtest with confidence threshold and minimum holding period.\par
+\par
+\b Action Items (Next Steps)\b0\par
+\bullet\tab Implement LSTM classification baseline and standardize outputs (metrics, preds, backtest stats).\par
+\bullet\tab Add a clear “probabilities → trades” explanation section to the report.\par
+\par
+\page
+\b Meeting: Supervisor Meeting — 2025-11-01\b0\par
+Attendees: Liu Chen; Prof. Henry C. B. Chan\par
+\par
+\b Agenda\b0\par
+\bullet\tab Review first end-to-end ML run (LSTM) and pipeline artifacts\par
+\bullet\tab Confirm report writing style and required documentation\par
+\par
+\b Progress Since Last Meeting\b0\par
+\bullet\tab Completed LSTM pipeline with walk-forward CV and cost-aware backtest; outputs generated under outputs/.\par
+\bullet\tab Identified that the trading layer (threshold/holding/cost) strongly affects realized returns.\par
+\par
+\b Discussion / Supervisor Feedback\b0\par
+\bullet\tab Supervisor emphasized reproducibility: every run should save run_config, CV metrics, preds, and plots.\par
+\bullet\tab Discussed that underperformance vs Buy&Hold is common for short-horizon signals; focus on methodology at interim stage.\par
+\par
+\b Decisions\b0\par
+\bullet\tab Keep evaluation protocol fixed across models for fairness (same windows, same backtest rules).\par
+\bullet\tab Proceed to Transformer encoder baseline to test long-range dependency modeling.\par
+\par
+\b Action Items (Next Steps)\b0\par
+\bullet\tab Implement Transformer baseline and run on GPU (Colab) if needed.\par
+\bullet\tab Update interim report with LSTM results and plots.\par
+\par
+\page
+\b Meeting: Supervisor Meeting — 2025-11-20\b0\par
+Attendees: Liu Chen; Prof. Henry C. B. Chan\par
+\par
+\b Agenda\b0\par
+\bullet\tab Review Transformer baseline results\par
+\bullet\tab Discuss time-series specific Transformers (Informer) and long-sequence efficiency\par
+\par
+\b Progress Since Last Meeting\b0\par
+\bullet\tab Transformer encoder baseline implemented and evaluated under identical protocol.\par
+\bullet\tab Results show slightly improved coverage but still behind Buy&Hold in total return.\par
+\par
+\b Discussion / Supervisor Feedback\b0\par
+\bullet\tab Supervisor suggested exploring time-series Transformer variants (Informer-style) for longer context.\par
+\bullet\tab Discussed “calibration vs trading rules”: probabilities may not be peaky; threshold too high can lead to no trades.\par
+\par
+\b Decisions\b0\par
+\bullet\tab Implement Informer-style encoder classifier (ProbSparse attention + distilling) and evaluate under same protocol.\par
+\bullet\tab Add an explicit trading-parameter sweep step (post-model) to analyze translation-layer sensitivity.\par
+\par
+\b Action Items (Next Steps)\b0\par
+\bullet\tab Implement Informer baseline + an optimized run with extended features and longer history.\par
+\bullet\tab Write a “lessons learned” section focusing on evaluation, leakage avoidance, and trading layer impact.\par
+\par
+\page
+\b Meeting: Supervisor Meeting — 2025-12-05\b0\par
+Attendees: Liu Chen; Prof. Henry C. B. Chan\par
+\par
+\b Agenda\b0\par
+\bullet\tab Review Informer-OPT and trading-parameter sweep findings\par
+\bullet\tab Discuss next-stage direction: news + pretrained text model\par
+\par
+\b Progress Since Last Meeting\b0\par
+\bullet\tab Completed Informer-style and Informer-OPT runs; performed post-hoc trading parameter sweep.\par
+\bullet\tab Observed that tuned threshold/holding can materially change realized Sharpe without retraining.\par
+\par
+\b Discussion / Supervisor Feedback\b0\par
+\bullet\tab Supervisor warned about “backtest overfitting” at the trading-rule layer; keep future evaluation conservative.\par
+\bullet\tab Discussed adding external signals (news sentiment) and expanding to a small HK multi-ticker universe.\par
+\par
+\b Decisions\b0\par
+\bullet\tab Integrate a news pipeline using GDELT for data acquisition and FinBERT as a pretrained model.\par
+\bullet\tab Use equal-weight portfolio backtest across a small HK universe to evaluate news coverage and signal behavior.\par
+\par
+\b Action Items (Next Steps)\b0\par
+\bullet\tab Collect more news data to increase aligned out-of-sample days; add alignment diagnostics to outputs.\par
+\bullet\tab Update interim report and prepare 10-minute presentation deck with plots.\par
+\par
+\page
+\b Meeting: Supervisor Meeting — 2025-12-18\b0\par
+Attendees: Liu Chen; Prof. Henry C. B. Chan\par
+\par
+\b Agenda\b0\par
+\bullet\tab Finalize interim report formatting and submission checklist\par
+\bullet\tab Prepare presentation storyline and Q&A\par
+\par
+\b Progress Since Last Meeting\b0\par
+\bullet\tab Handbook-compliant interim report prepared (cover, TOC, figures/tables, references).\par
+\bullet\tab Beamer slide deck drafted with speaker notes for a 10-minute presentation.\par
+\par
+\b Discussion / Supervisor Feedback\b0\par
+\bullet\tab Supervisor advised: emphasize methodology, reproducibility, and what was learned—rather than claiming alpha.\par
+\bullet\tab Agree to position news stage as a systems milestone due to limited coverage.\par
+\par
+\b Decisions\b0\par
+\bullet\tab Submit interim report PDF and meeting notes as required.\par
+\bullet\tab In next stage, prioritize PatchTST (strong TS baseline) and expand news coverage.\par
+\par
+\b Action Items (Next Steps)\b0\par
+\bullet\tab Rehearse presentation timing (≈60s per slide) and prepare brief answers on: leakage, costs, and why Buy&Hold is hard to beat.\par
+\bullet\tab After interim submission, run PatchTST experiments and re-run FinBERT with expanded news dataset.\par
+\par
+}
